@@ -10,6 +10,17 @@ describe('utils', () => {
     assert.strictEqual(utils.isStream({ foo: 'bar' }), false);
   });
 
+  it('should not treat plain objects as Stream when Object.prototype is polluted', () => {
+    try {
+      Object.prototype.pipe = () => {};
+
+      assert.strictEqual(utils.isStream({ foo: 'bar' }), false);
+      assert.strictEqual(utils.isStream(new stream.Readable()), true);
+    } finally {
+      delete Object.prototype.pipe;
+    }
+  });
+
   it('should validate Buffer', () => {
     assert.strictEqual(utils.isBuffer(Buffer.from('a')), true);
     assert.strictEqual(utils.isBuffer(null), false);
@@ -51,6 +62,32 @@ describe('utils', () => {
         }
       }
       assert.equal(utils.isFormData(new FormData()), true);
+    });
+
+    it('should not treat plain objects as FormData when Object.prototype is polluted', () => {
+      try {
+        Object.prototype.append = () => {};
+        Object.prototype[Symbol.toStringTag] = 'FormData';
+
+        assert.equal(utils.isFormData('foo=bar'), false);
+        assert.equal(utils.isFormData({ foo: 'bar' }), false);
+      } finally {
+        delete Object.prototype.append;
+        delete Object.prototype[Symbol.toStringTag];
+      }
+    });
+
+    it('should not treat plain objects and strings as spec-compliant FormData when Object.prototype is polluted', () => {
+      try {
+        Object.prototype.append = () => {};
+        Object.prototype[Symbol.toStringTag] = 'FormData';
+
+        assert.equal(utils.isSpecCompliantForm({ foo: 'bar' }), false);
+        assert.equal(utils.isSpecCompliantForm('foo=bar'), false);
+      } finally {
+        delete Object.prototype.append;
+        delete Object.prototype[Symbol.toStringTag];
+      }
     });
   });
 

@@ -2445,6 +2445,97 @@ describe('supports http with nodejs', () => {
           await stopHTTPServer(server);
         }
       });
+
+      it('should preserve custom headers returned by form-data getHeaders', async () => {
+        const form = new FormDataLegacy();
+        const originalGetHeaders = form.getHeaders.bind(form);
+        let receivedHeaders;
+
+        form.append('foo', 'bar');
+        form.getHeaders = (...args) => {
+          return {
+            ...originalGetHeaders(...args),
+            'X-Custom-Header': 'custom',
+          };
+        };
+
+        const server = await startHTTPServer(
+          async (req, res) => {
+            receivedHeaders = req.headers;
+            await getStream(req);
+            res.end('ok');
+          },
+          { port: SERVER_PORT }
+        );
+
+        try {
+          await axios.post(`http://localhost:${server.address().port}/`, form, {
+            adapter: 'http',
+          });
+
+          assert.strictEqual(receivedHeaders['x-custom-header'], 'custom');
+          assert.match(receivedHeaders['content-type'], /^multipart\/form-data; boundary=/i);
+        } finally {
+          await stopHTTPServer(server);
+        }
+      });
+
+      it('should ignore unsafe headers from polluted Object.prototype', async () => {
+        let server;
+        let receivedHeaders;
+
+        try {
+          Object.prototype[Symbol.toStringTag] = 'FormData';
+          Object.prototype.append = () => {};
+          Object.prototype.getHeaders = () => {
+            const headers = Object.create(null);
+            headers.Authorization = 'Injected';
+            headers['X-Polluted'] = '1';
+            return headers;
+          };
+          Object.prototype.pipe = function (destination) {
+            destination && destination.end && destination.end();
+            return destination;
+          };
+          Object.prototype.on = function () {
+            return this;
+          };
+          Object.prototype.once = function () {
+            return this;
+          };
+
+          server = await startHTTPServer(
+            (req, res) => {
+              receivedHeaders = req.headers;
+              res.end('ok');
+            },
+            { port: SERVER_PORT }
+          );
+
+          await axios.post(
+            `http://localhost:${server.address().port}/`,
+            { foo: 'bar' },
+            {
+              adapter: 'http',
+              headers: {
+                Authorization: 'Bearer VALID',
+              },
+            }
+          );
+
+          assert.notStrictEqual(receivedHeaders.authorization, 'Injected');
+          assert.strictEqual(receivedHeaders['x-polluted'], undefined);
+        } finally {
+          delete Object.prototype[Symbol.toStringTag];
+          delete Object.prototype.append;
+          delete Object.prototype.getHeaders;
+          delete Object.prototype.pipe;
+          delete Object.prototype.on;
+          delete Object.prototype.once;
+
+          server && (await stopHTTPServer(server));
+        }
+      });
     });
 
     describe('SpecCompliant FormData', () => {
